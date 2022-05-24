@@ -1,9 +1,8 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 
-import ormConfig from './ormConfig';
-import { DataSource } from 'typeorm';
-import { User } from './entities/User';
+import db, { client } from './db';
+import dbQuery from './dbQuery';
 
 dotenv.config();
 
@@ -13,28 +12,72 @@ const app = express();
 
 const main = async () => {
   try {
-    const AppDataSource = new DataSource(ormConfig);
-    await AppDataSource.initialize();
-    console.log('Connected to Postgres');
-
+    db();
     app.use(express.json());
 
-    console.log('Inserting a new user into the database...');
-    const user = new User();
-    user.firstName = 'Daniel';
-    user.lastName = 'Craig';
-    user.age = 50;
-    await AppDataSource.manager.save(user);
-    console.log('Saved a new user with id: ' + user.id);
+    app.post('/api/create_table/topic', async (req: Request, res: Response) => {
+      try {
+        const query = `
+          CREATE TABLE IF NOT EXISTS topic (
+            id SERIAL PRIMARY KEY,
+            title VARCHAR(255) UNIQUE NOT NULL
+          );
+        `;
+        const { ok, error, result } = await dbQuery(query);
+        if (!ok) return res.status(400).json({ ok: false, error });
+        return res.status(200).json({ ok: true, data: result });
+      } catch (err) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+    });
 
-    console.log('Loading users from the database...');
-    const users = await AppDataSource.manager.find(User);
-    console.log('Loaded users: ', users);
+    app.post(
+      '/api/create_table/ranking',
+      async (req: Request, res: Response) => {
+        try {
+          const query = `
+          CREATE TABLE IF NOT EXISTS ranking (
+            id SERIAL PRIMARY KEY,
+            rank INT NOT NULL CHECK(1<=rank AND rank<=100),
+            topic_id INT NOT NULL,
+            CONSTRAINT fk_topic FOREIGN KEY(topic_id) REFERENCES topic(id) ON DELETE CASCADE
+          );
+        `;
+          const { ok, error, result } = await dbQuery(query);
+          if (!ok) return res.status(400).json({ ok: false, error });
+          return res.status(200).json({ ok: true, data: result });
+        } catch (err) {
+          return res.status(400).json({ ok: false, error: err.message });
+        }
+      }
+    );
+
+    app.post('/api/topic', async (req: Request, res: Response) => {
+      try {
+        const { title, rank } = req.body;
+
+        await dbQuery('BEGIN');
+        const res1 = await dbQuery(`INSERT INTO topic(title) VALUES ($1);`, [
+          title
+        ]);
+        if (!res1.ok) throw new Error(res1.error);
+        const res2 = await dbQuery(
+          `INSERT INTO ranking(rank, topic_id) 
+            VALUES($2, (SELECT id FROM topic WHERE title=$1));`,
+          [title, rank]
+        );
+        if (!res2.ok) throw new Error(res2.error);
+        await dbQuery('COMMIT');
+
+        return res.status(200).json({ ok: true, data: 'data inserted' });
+      } catch (err) {
+        await dbQuery('ROLLBACK');
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+    });
 
     app.listen(4000, () => console.log(`Server running on port ${PORT}`));
-  } catch (err) {
-    throw new Error('Unable to connect to Postgres');
-  }
+  } catch (err) {}
 };
 
 main();
