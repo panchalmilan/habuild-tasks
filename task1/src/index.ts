@@ -1,8 +1,9 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 
-import db, { client } from './db';
+import db from './db';
 import dbQuery from './dbQuery';
+import validateRank from './middlewares/validateRank';
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ const main = async () => {
     db();
     app.use(express.json());
 
+    // create topic table
     app.post('/api/create_table/topic', async (req: Request, res: Response) => {
       try {
         const query = `
@@ -31,6 +33,7 @@ const main = async () => {
       }
     });
 
+    // create ranking table
     app.post(
       '/api/create_table/ranking',
       async (req: Request, res: Response) => {
@@ -52,29 +55,57 @@ const main = async () => {
       }
     );
 
-    app.post('/api/topic', async (req: Request, res: Response) => {
-      try {
-        const { title, rank } = req.body;
+    // create topic
+    app.post(
+      '/api/topic',
+      validateRank,
+      async (req: Request, res: Response) => {
+        try {
+          const { title, rank } = req.body;
 
-        await dbQuery('BEGIN');
-        const res1 = await dbQuery(`INSERT INTO topic(title) VALUES ($1);`, [
-          title
-        ]);
-        if (!res1.ok) throw new Error(res1.error);
-        const res2 = await dbQuery(
-          `INSERT INTO ranking(rank, topic_id) 
+          await dbQuery('BEGIN');
+          const res1 = await dbQuery(`INSERT INTO topic(title) VALUES ($1);`, [
+            title
+          ]);
+          if (!res1.ok) throw new Error(res1.error);
+          const res2 = await dbQuery(
+            `INSERT INTO ranking(rank, topic_id) 
             VALUES($2, (SELECT id FROM topic WHERE title=$1));`,
-          [title, rank]
-        );
-        if (!res2.ok) throw new Error(res2.error);
-        await dbQuery('COMMIT');
+            [title, rank]
+          );
+          if (!res2.ok) throw new Error(res2.error);
+          await dbQuery('COMMIT');
 
-        return res.status(200).json({ ok: true, data: 'data inserted' });
-      } catch (err) {
-        await dbQuery('ROLLBACK');
-        return res.status(400).json({ ok: false, error: err.message });
+          return res.status(200).json({ ok: true, data: 'data inserted' });
+        } catch (err) {
+          await dbQuery('ROLLBACK');
+          return res.status(400).json({ ok: false, error: err.message });
+        }
       }
-    });
+    );
+
+    // update rank
+    app.put(
+      '/api/topic/',
+      validateRank,
+      async (req: Request, res: Response) => {
+        try {
+          const { title, rank } = req.body;
+          const { ok, error, result } = await dbQuery(
+            ` UPDATE ranking
+              SET rank=$2
+              WHERE topic_id = (SELECT id FROM topic WHERE title=$1);`,
+            [title, rank]
+          );
+          if (result?.rowCount == 0)
+            throw new Error(`topic with title ${title} does not exists`);
+          if (!ok) return res.status(400).json({ ok: false, error });
+          return res.status(200).json({ ok: true, data: result });
+        } catch (err) {
+          return res.status(400).json({ ok: false, error: err.message });
+        }
+      }
+    );
 
     app.listen(4000, () => console.log(`Server running on port ${PORT}`));
   } catch (err) {}
