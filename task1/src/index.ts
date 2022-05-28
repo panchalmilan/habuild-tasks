@@ -84,6 +84,27 @@ const main = async () => {
       }
     );
 
+    // get topic from id
+    app.get('/api/topic/:id', async (req: Request, res: Response) => {
+      try {
+        const { id } = req.params;
+        const { ok, error, result } = await dbQuery(
+          ` SELECT topic.id, title, rank 
+          FROM topic 
+          JOIN ranking
+            ON ranking.topic_id=$1;
+         `,
+          [id]
+        );
+        if (result?.rowCount == 0)
+          throw new Error(`topic with id ${id} does not exists`);
+        if (!ok) return res.status(400).json({ ok: false, error });
+        return res.status(200).json({ ok: true, data: result?.rows[0] });
+      } catch (err) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+    });
+
     // update rank
     app.put(
       '/api/topic/',
