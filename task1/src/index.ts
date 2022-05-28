@@ -1,9 +1,11 @@
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
 
 import db from './db';
 import dbQuery from './dbQuery';
-import validateRank from './middlewares/validateRank';
+import validateRank from './validateRank.middleware';
+import verifyToken from './verifyToken';
 
 dotenv.config();
 
@@ -122,6 +124,40 @@ const main = async () => {
             throw new Error(`topic with title ${title} does not exists`);
           if (!ok) return res.status(400).json({ ok: false, error });
           return res.status(200).json({ ok: true, data: result });
+        } catch (err) {
+          return res.status(400).json({ ok: false, error: err.message });
+        }
+      }
+    );
+
+    /* --------------------------- USER AUTHENTICATION -------------------------- */
+
+    // generate token
+    app.post('/api/signup', async (req: Request, res: Response) => {
+      try {
+        const { id, username, firstname } = req.body;
+        if (!id || !username || !firstname)
+          throw new Error('id or username or firstname not passed');
+        const user = { id, username, firstname }; //payload
+        const token = jwt.sign(user, process.env.JWT_SECRET!, {
+          expiresIn: '7d'
+        });
+        // save user in db and do some business logic
+        return res.status(201).json({ ok: true, token });
+      } catch (err) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+    });
+
+    // verify token
+    app.post(
+      '/api/verify_token',
+      verifyToken,
+      async (req: any, res: Response) => {
+        try {
+          const { user } = req;
+          if (!user) throw new Error('user with jwt not found');
+          return res.status(200).json({ ok: true, user });
         } catch (err) {
           return res.status(400).json({ ok: false, error: err.message });
         }
